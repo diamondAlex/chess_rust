@@ -15,41 +15,15 @@ use ratatui::{
 };
 
 #[derive(Debug, Copy, Clone)]
-struct ChessSquare{
-    piece : ChessPiece,
-    color : BColors,
-    rec : Rect
-}
-
-impl ChessSquare{
-    fn new(piece: ChessPiece, color: BColors, rec: Rect) -> Self {
-        Self{ piece, color, rec}
-    }
-    
-    fn get_text<'a>(self) -> Vec<Line<'a>>{
-        return self.piece.piece.get_text()
-    }
-}
-
-impl Default for ChessSquare{
-    fn default() -> Self{
-        ChessSquare{ 
-            piece: ChessPiece::default(), 
-            color: BColors::BLACK,
-            rec : Rect { x:0,y:0,width:0,height:0}
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
 struct ChessPiece{
     piece : Piece,
     color : PColors,
+    rec : Rect
 }
 
 impl ChessPiece{
-    fn new(piece: Piece, color: PColors) -> Self {
-        Self{ piece, color}
+    fn new(piece: Piece, color: PColors, rec: Rect) -> Self {
+        Self{ piece, color, rec}
     }
     
 }
@@ -57,7 +31,8 @@ impl Default for ChessPiece{
     fn default() -> Self{
         ChessPiece{ 
             piece: Piece::EMPTY, 
-            color: PColors::BLACK
+            color: PColors::BLACK,
+            rec: Rect{ x:0,y:0,width:0,height:0}
         }
     }
 }
@@ -137,20 +112,6 @@ impl Piece{
 }
 
 #[derive(Debug, Copy, Clone)]
-enum BColors{
-    BLACK,
-    WHITE
-}
-
-impl BColors{
-    fn get_color(self) -> Color{
-        match self{
-            BColors::BLACK => Color::Black,
-            BColors::WHITE => Color::White
-        }
-    }
-}
-#[derive(Debug, Copy, Clone)]
 enum PColors{
     BLACK,
     WHITE
@@ -175,12 +136,17 @@ fn print_e_type(input: Piece) -> io::Result<String>{
     }
 }
 
+struct GameState{
+    turn : PColors
+}
+
 fn main() -> io::Result<()> {
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     stdout().execute(EnableMouseCapture)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
-    let mut board : [[ChessSquare;8];8] = [[ChessSquare::default();8];8];
+    let mut game_state = GameState { turn: PColors::WHITE };
+    let mut board : [[ChessPiece;8];8] = [[ChessPiece::default();8];8];
     init_board(&mut board);
     let mut should_quit = false;
     let mut message = String::new();
@@ -190,7 +156,7 @@ fn main() -> io::Result<()> {
         terminal.draw(|f| {
             ui(f,board,&message);
         })?;
-        should_quit = handle_events(&mut board,&mut message,&mut from)?;
+        should_quit = handle_events(&mut game_state, &mut board,&mut message,&mut from)?;
     }
     disable_raw_mode()?;
     stdout().execute(LeaveAlternateScreen)?;
@@ -205,7 +171,7 @@ fn in_square(rect : Rect, x : u16, y: u16) -> bool{
         && y < rect.y + rect.height
 }
 
-fn check_square_click(board: &[[ChessSquare;8];8], col: u16, row:u16) -> io::Result<i32>{
+fn check_square_click(board: &[[ChessPiece;8];8], col: u16, row:u16) -> io::Result<i32>{
     for i in 0..board.len(){
         for j in 0..board[i].len(){
             if in_square(board[i][j].rec, col, row){
@@ -219,7 +185,11 @@ fn check_square_click(board: &[[ChessSquare;8];8], col: u16, row:u16) -> io::Res
     Ok(-1)
 }
 
-fn handle_events( board: &mut[[ChessSquare;8];8], message :&mut String, from: &mut i32) -> io::Result<bool> {
+fn check_move(message: &mut String, ti: usize,tj: usize,fi: usize,fj: usize,piece: ChessPiece, game_state: &mut GameState) -> bool{
+    return true
+}
+
+fn handle_events(game_state: &mut GameState, board: &mut[[ChessPiece;8];8], message :&mut String, from: &mut i32) -> io::Result<bool> {
     if event::poll(std::time::Duration::from_millis(50))? {
         match event::read()? {
             Event::Key(key) => {
@@ -231,7 +201,6 @@ fn handle_events( board: &mut[[ChessSquare;8];8], message :&mut String, from: &m
                 }
             }
             Event::Mouse(mouse) =>{
-                //this doesn't seem right, it seems very rustlike(so stupid basically)
                 if mouse.kind == event::MouseEventKind::Down(event::MouseButton::Left){
                     message.clear();
                     let to = check_square_click(board, mouse.column, mouse.row).unwrap();
@@ -240,7 +209,7 @@ fn handle_events( board: &mut[[ChessSquare;8];8], message :&mut String, from: &m
                         *from = to;
                         let fi = (*from/8 as i32) as usize;
                         let fj = (*from%8) as usize;
-                        *message = print_e_type(board[fi][fj].piece.piece).unwrap();
+                        *message = print_e_type(board[fi][fj].piece).unwrap();
                     }else{
                         //what the sigma??
                         let ti = (to/8 as i32) as usize;
@@ -249,10 +218,14 @@ fn handle_events( board: &mut[[ChessSquare;8];8], message :&mut String, from: &m
                         let fj = (*from%8) as usize;
                         println!("{}.{}.{}.{}",fi,fj,ti,tj);
                         //print_e_type(board[fi][fj].piece.piece);
-                        board[ti][tj].piece = board[fi][fj].piece.clone();
-                        board[fi][fj].piece = ChessPiece::default();
-                        //*message = print_e_type(board[ti][tj].piece.piece).unwrap();
-                        *from = -1;
+                        if check_move(message,ti,tj,fi,fj,board[fi][fj], game_state){
+                            board[ti][tj].piece =  board[fi][fj].piece.clone();
+                            board[ti][tj].color =  board[fi][fj].color.clone();
+                            board[fi][fj].piece =  Piece::EMPTY;
+                            board[fi][fj].color =  PColors::BLACK;
+                            *message = print_e_type(board[ti][tj].piece).unwrap();
+                            *from = -1;
+                        }
                     }
                 }
             },
@@ -291,59 +264,36 @@ fn get_color(x : u16, y : u16) -> PColors {
     }
 }
 
-fn create_new_piece(i : u16, j : u16) -> ChessSquare{
+fn create_new_piece(i : u16, j : u16) -> ChessPiece{
     let x : u16 = 5+(7 * j) as u16;
     let y : u16 = 5+(i * 4) as u16;
     let width : u16 = 7;
     let height : u16 = 4;
 
-    let sp = ChessPiece{
+    let cp = ChessPiece {
         piece: Piece::PAWN,
-        color: PColors::WHITE
-    };
-
-    let cs = ChessSquare {
-        piece: sp,
-        color: {
-            if (i*8+(j+i%2))%2 == 1{
-                BColors::WHITE
-            }else{
-                BColors::BLACK
-            }
-        },
+        color: PColors::BLACK,
         rec: Rect{x:x,y:y,width:width,height:height}
     };
-    return cs
+    return cp
 }
-fn init_board(board: &mut [[ChessSquare;8];8]){
+fn init_board(board: &mut [[ChessPiece;8];8]){
     for i in 0..8 {
         for j in 0..8{
             let x : u16 = 5+(7*j) as u16;
             let y : u16 = 5+(i*4) as u16;
             let width : u16 = 7;
             let height : u16 = 4;
-            
-            let sp = ChessPiece{
+            board[i as usize][j as usize] = ChessPiece {
                 piece: get_piece(i,j),
-                color: get_color(i,j) 
-            };
-
-            board[i as usize][j as usize] = ChessSquare {
-                piece: sp,
-                color: {
-                        if (i*8+(j+i%2))%2 == 1{
-                            BColors::WHITE
-                        }else{
-                            BColors::BLACK
-                        }
-                },
+                color: get_color(i,j),
                 rec: Rect{x:x,y:y,width:width,height:height}
             };
         }
     }
 }
 
-fn ui(frame: &mut Frame, mut board: [[ChessSquare;8];8], message: &String) {
+fn ui(frame: &mut Frame, mut board: [[ChessPiece;8];8], message: &String) {
     for i in 0..8 {
         for j in 0..8{
             let curr_square = board[i][j];
@@ -367,10 +317,18 @@ fn ui(frame: &mut Frame, mut board: [[ChessSquare;8];8], message: &String) {
 
             let area = Rect::new(x,y,w,h);
             let style = Style::default()
-                .bg(curr_square.color.get_color())
-                .fg(curr_square.piece.color.get_color());
+                .bg(
+                    {
+                        if (i*8+(j+i%2))%2 == 1{
+                            Color::White
+                        }else{
+                            Color::Black
+                        }
+                    }
+                )
+                .fg(curr_square.color.get_color());
 
-            let piece = Paragraph::new(curr_square.get_text())
+            let piece = Paragraph::new(curr_square.piece.get_text())
                 .alignment(Alignment::Center)
                 .wrap(Wrap { trim: true })
                 .style(style.bold());
